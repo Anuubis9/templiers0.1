@@ -86,9 +86,9 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 @bot.event
 async def on_ready():
     print(f'{bot.user} has connected to Discord!')
-    # Récupération des messages de stock sauvegardés
     global stock_message_munitions, stock_message_pharmacie
-    
+
+    # Récupération des messages de stock sauvegardés
     try:
         # Récupération du message des munitions
         cur.execute('SELECT value FROM bot_state WHERE key = %s', ('stock_message_id_munitions',))
@@ -149,198 +149,18 @@ async def update_stock_message_pharmacie():
             message += "*Aucun médicament en stock.*\n"
         await stock_message_pharmacie.edit(content=message)
 
-# Classes pour les vues (MunitionsView, PharmacieView, RadioButton restent identiques)
-# Classe pour gérer les munitions
+# Classes pour les vues des boutons des munitions et médicaments
 class MunitionsView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
+        for munition in munitions_list:
+            self.add_item(discord.ui.Button(label=munition, style=discord.ButtonStyle.blurple, custom_id=f"munition_{munition}"))
 
-    @discord.ui.button(label="Ajouter des munitions", style=discord.ButtonStyle.green, custom_id="add_munitions")
-    async def add_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        modal = AddMunitionsModal()
-        await interaction.response.send_modal(modal)
-
-    @discord.ui.button(label="Retirer des munitions", style=discord.ButtonStyle.red, custom_id="remove_munitions")
-    async def remove_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        modal = RemoveMunitionsModal()
-        await interaction.response.send_modal(modal)
-
-class AddMunitionsModal(discord.ui.Modal, title="Ajouter des munitions"):
-    def __init__(self):
-        super().__init__()
-        self.type = discord.ui.Select(
-            placeholder="Choisir le type de munitions",
-            options=[discord.SelectOption(label=munition) for munition in munitions_list]
-        )
-        self.quantity = discord.ui.TextInput(
-            label="Quantité à ajouter",
-            placeholder="Entrez un nombre",
-            required=True
-        )
-        self.add_item(self.type)
-        self.add_item(self.quantity)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            quantity = int(self.quantity.value)
-            if quantity <= 0:
-                raise ValueError("La quantité doit être positive")
-            
-            cur.execute(
-                'UPDATE stock_munitions SET quantity = quantity + %s WHERE item = %s',
-                (quantity, self.type.values[0])
-            )
-            conn.commit()
-            
-            await update_stock_message_munitions()
-            await interaction.response.send_message(f"✅ {quantity} {self.type.values[0]} ont été ajoutées au stock.", ephemeral=True)
-            
-        except ValueError as e:
-            await interaction.response.send_message("❌ Erreur : " + str(e), ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message("❌ Une erreur est survenue lors de l'ajout des munitions.", ephemeral=True)
-
-class RemoveMunitionsModal(discord.ui.Modal, title="Retirer des munitions"):
-    def __init__(self):
-        super().__init__()
-        self.type = discord.ui.Select(
-            placeholder="Choisir le type de munitions",
-            options=[discord.SelectOption(label=munition) for munition in munitions_list]
-        )
-        self.quantity = discord.ui.TextInput(
-            label="Quantité à retirer",
-            placeholder="Entrez un nombre",
-            required=True
-        )
-        self.add_item(self.type)
-        self.add_item(self.quantity)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            quantity = int(self.quantity.value)
-            if quantity <= 0:
-                raise ValueError("La quantité doit être positive")
-            
-            cur.execute('SELECT quantity FROM stock_munitions WHERE item = %s', (self.type.values[0],))
-            current_stock = cur.fetchone()[0]
-            
-            if quantity > current_stock:
-                raise ValueError("Stock insuffisant")
-            
-            cur.execute(
-                'UPDATE stock_munitions SET quantity = quantity - %s WHERE item = %s',
-                (quantity, self.type.values[0])
-            )
-            conn.commit()
-            
-            await update_stock_message_munitions()
-            await interaction.response.send_message(f"✅ {quantity} {self.type.values[0]} ont été retirées du stock.", ephemeral=True)
-            
-        except ValueError as e:
-            await interaction.response.send_message("❌ Erreur : " + str(e), ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message("❌ Une erreur est survenue lors du retrait des munitions.", ephemeral=True)
-
-# Classe pour gérer la pharmacie
 class PharmacieView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-
-    @discord.ui.button(label="Ajouter des médicaments", style=discord.ButtonStyle.green, custom_id="add_pharmacie")
-    async def add_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        modal = AddPharmacieModal()
-        await interaction.response.send_modal(modal)
-
-    @discord.ui.button(label="Retirer des médicaments", style=discord.ButtonStyle.red, custom_id="remove_pharmacie")
-    async def remove_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        modal = RemovePharmacieModal()
-        await interaction.response.send_modal(modal)
-
-class AddPharmacieModal(discord.ui.Modal, title="Ajouter des médicaments"):
-    def __init__(self):
-        super().__init__()
-        self.type = discord.ui.Select(
-            placeholder="Choisir le type de médicament",
-            options=[discord.SelectOption(label=med) for med in pharmacie_list]
-        )
-        self.quantity = discord.ui.TextInput(
-            label="Quantité à ajouter",
-            placeholder="Entrez un nombre",
-            required=True
-        )
-        self.add_item(self.type)
-        self.add_item(self.quantity)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            quantity = int(self.quantity.value)
-            if quantity <= 0:
-                raise ValueError("La quantité doit être positive")
-            
-            cur.execute(
-                'UPDATE stock_pharmacie SET quantity = quantity + %s WHERE item = %s',
-                (quantity, self.type.values[0])
-            )
-            conn.commit()
-            
-            await update_stock_message_pharmacie()
-            await interaction.response.send_message(f"✅ {quantity} {self.type.values[0]} ont été ajoutés au stock.", ephemeral=True)
-            
-        except ValueError as e:
-            await interaction.response.send_message("❌ Erreur : " + str(e), ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message("❌ Une erreur est survenue lors de l'ajout des médicaments.", ephemeral=True)
-
-class RemovePharmacieModal(discord.ui.Modal, title="Retirer des médicaments"):
-    def __init__(self):
-        super().__init__()
-        self.type = discord.ui.Select(
-            placeholder="Choisir le type de médicament",
-            options=[discord.SelectOption(label=med) for med in pharmacie_list]
-        )
-        self.quantity = discord.ui.TextInput(
-            label="Quantité à retirer",
-            placeholder="Entrez un nombre",
-            required=True
-        )
-        self.add_item(self.type)
-        self.add_item(self.quantity)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            quantity = int(self.quantity.value)
-            if quantity <= 0:
-                raise ValueError("La quantité doit être positive")
-            
-            cur.execute('SELECT quantity FROM stock_pharmacie WHERE item = %s', (self.type.values[0],))
-            current_stock = cur.fetchone()[0]
-            
-            if quantity > current_stock:
-                raise ValueError("Stock insuffisant")
-            
-            cur.execute(
-                'UPDATE stock_pharmacie SET quantity = quantity - %s WHERE item = %s',
-                (quantity, self.type.values[0])
-            )
-            conn.commit()
-            
-            await update_stock_message_pharmacie()
-            await interaction.response.send_message(f"✅ {quantity} {self.type.values[0]} ont été retirés du stock.", ephemeral=True)
-            
-        except ValueError as e:
-            await interaction.response.send_message("❌ Erreur : " + str(e), ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message("❌ Une erreur est survenue lors du retrait des médicaments.", ephemeral=True)
-
-# Classe pour le bouton radio
-class RadioButton(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="Changer de station", style=discord.ButtonStyle.primary, custom_id="radio_button")
-    async def radio_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        station = random.choice(stations_radio)
-        await interaction.response.send_message(f"📻 Fréquence radio : {station} MHz", ephemeral=True)
+        for medicament in pharmacie_list:
+            self.add_item(discord.ui.Button(label=medicament, style=discord.ButtonStyle.blurple, custom_id=f"pharmacie_{medicament}"))
 
 # Nouvelle commande !init globale
 @bot.command()
@@ -357,15 +177,12 @@ async def init(ctx):
         # Initialisation du tableau des munitions
         munitions_channel = bot.get_channel(1290283964547989514)
         if munitions_channel:
-            # Supprime les anciens messages dans le canal
             await munitions_channel.purge()
-            
             stock_message_munitions = await munitions_channel.send("**Chargement du tableau des stocks...**")
             await update_stock_message_munitions()
             view_munitions = MunitionsView()
             await munitions_channel.send("Gestion des munitions :", view=view_munitions)
-            
-            # Sauvegarde l'ID du message dans la base de données
+
             cur.execute('INSERT INTO bot_state (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = %s',
                         ("stock_message_id_munitions", str(stock_message_munitions.id), str(stock_message_munitions.id)))
             conn.commit()
@@ -373,34 +190,15 @@ async def init(ctx):
         # Initialisation du tableau de la pharmacie
         pharmacie_channel = bot.get_channel(1293868842115797013)
         if pharmacie_channel:
-            # Supprime les anciens messages dans le canal
             await pharmacie_channel.purge()
-            
             stock_message_pharmacie = await pharmacie_channel.send("**Chargement du tableau des stocks...**")
             await update_stock_message_pharmacie()
             view_pharmacie = PharmacieView()
             await pharmacie_channel.send("Gestion de la pharmacie :", view=view_pharmacie)
-            
-            # Sauvegarde l'ID du message dans la base de données
+
             cur.execute('INSERT INTO bot_state_pharmacie (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = %s',
                         ("stock_message_id_pharmacie", str(stock_message_pharmacie.id), str(stock_message_pharmacie.id)))
             conn.commit()
-
-        # Initialisation du bouton radio
-        radio_channel = bot.get_channel(1291085634538176572)
-        if radio_channel:
-            # Supprime les anciens messages dans le canal
-            await radio_channel.purge()
-            
-            view_radio = RadioButton()
-            await radio_channel.send("Appuyez sur le bouton pour sélectionner une station de radio aléatoire :", view=view_radio)
-
-        # Message de confirmation
-        success_message = await ctx.send("✅ Initialisation terminée avec succès!")
-        await asyncio.sleep(5)
-        await success_message.delete()
-        if ctx.message:
-            await ctx.message.delete()
 
     except Exception as e:
         error_message = await ctx.send(f"❌ Une erreur est survenue lors de l'initialisation : {str(e)}")
@@ -409,17 +207,5 @@ async def init(ctx):
         if ctx.message:
             await ctx.message.delete()
 
-# Gestion des erreurs pour la commande init
-@init.error
-async def init_error(ctx, error):
-    if isinstance(error, commands.MissingPermissions):
-        message = await ctx.send("❌ Vous devez être administrateur pour utiliser cette commande.")
-        await asyncio.sleep(5)
-        await message.delete()
-        if ctx.message:
-            await ctx.message.delete()
-
 keep_alive()
-
-# Lancement du bot
 bot.run(token)

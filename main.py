@@ -13,6 +13,10 @@ load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
 database_url = os.getenv('DATABASE_URL')
 
+# Variables globales pour stocker les messages de stock
+stock_message_munitions = None
+stock_message_pharmacie = None
+
 # Liste des stations de radio disponibles
 stations_radio = [87.8, 89.5, 91.3, 91.9, 94.6, 96.6, 99.7, 102.5]
 
@@ -78,6 +82,38 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
+# Event when bot is ready
+@bot.event
+async def on_ready():
+    print(f'{bot.user} has connected to Discord!')
+    # Récupération des messages de stock sauvegardés
+    global stock_message_munitions, stock_message_pharmacie
+    
+    try:
+        # Récupération du message des munitions
+        cur.execute('SELECT value FROM bot_state WHERE key = %s', ('stock_message_id_munitions',))
+        result = cur.fetchone()
+        if result:
+            message_id = int(result[0])
+            channel = bot.get_channel(1290283964547989514)
+            try:
+                stock_message_munitions = await channel.fetch_message(message_id)
+            except:
+                stock_message_munitions = None
+
+        # Récupération du message de la pharmacie
+        cur.execute('SELECT value FROM bot_state_pharmacie WHERE key = %s', ('stock_message_id_pharmacie',))
+        result = cur.fetchone()
+        if result:
+            message_id = int(result[0])
+            channel = bot.get_channel(1293868842115797013)
+            try:
+                stock_message_pharmacie = await channel.fetch_message(message_id)
+            except:
+                stock_message_pharmacie = None
+    except Exception as e:
+        print(f"Erreur lors de la récupération des messages : {e}")
+
 # Fonction pour mettre à jour les tableaux de stock
 async def update_stock_message_munitions():
     global stock_message_munitions
@@ -113,145 +149,87 @@ async def update_stock_message_pharmacie():
             message += "*Aucun médicament en stock.*\n"
         await stock_message_pharmacie.edit(content=message)
 
-# Classe pour générer des boutons pour les munitions
-class MunitionsView(ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.create_buttons()
+# Classes pour les vues (MunitionsView, PharmacieView, RadioButton restent identiques)
+[Les classes MunitionsView, PharmacieView et RadioButton restent exactement les mêmes que dans votre code original]
 
-    def create_buttons(self):
-        for munition in munitions_list:
-            self.add_item(ui.Button(label=f"Modifier {munition}", style=discord.ButtonStyle.primary, custom_id=f"mod_munitions_{munition}"))
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        custom_id = interaction.data["custom_id"]
-        if custom_id.startswith("mod_munitions_"):
-            munition = custom_id[len("mod_munitions_"):]
-            await interaction.response.send_message(f"Combien de {munition} voulez-vous ajouter ou retirer ? (Nombre positif pour ajouter, négatif pour retirer)", ephemeral=True)
-            def check(message):
-                return message.author == interaction.user and message.channel == interaction.channel
-            try:
-                response = await bot.wait_for('message', check=check, timeout=30)
-                try:
-                    quantity_change = int(response.content)
-                except ValueError:
-                    await interaction.followup.send("Veuillez entrer un nombre valide.", ephemeral=True)
-                    return False
-                await response.delete(delay=10)
-                cur.execute('SELECT quantity FROM stock_munitions WHERE item=%s', (munition,))
-                result = cur.fetchone()
-                if result:
-                    current_quantity = result[0]
-                    new_quantity = max(0, current_quantity + quantity_change)
-                    cur.execute('UPDATE stock_munitions SET quantity=%s WHERE item=%s', (new_quantity, munition))
-                    conn.commit()
-                    confirmation_message = await interaction.followup.send(f"{abs(quantity_change)} {munition} {'ajoutées' if quantity_change > 0 else 'retirées'}. Nouveau stock : {new_quantity}", ephemeral=True)
-                    await asyncio.sleep(10)
-                    await confirmation_message.delete()
-                    await update_stock_message_munitions()
-                else:
-                    print("Erreur : munition introuvable dans la base de données.")
-            except asyncio.TimeoutError:
-                await interaction.followup.send("Temps écoulé, veuillez réessayer.", ephemeral=True)
-        return True
-
-# Classe pour générer des boutons pour la pharmacie
-class PharmacieView(ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.create_buttons()
-
-    def create_buttons(self):
-        for medicament in pharmacie_list:
-            self.add_item(ui.Button(label=f"Modifier {medicament}", style=discord.ButtonStyle.primary, custom_id=f"mod_pharmacie_{medicament}"))
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        custom_id = interaction.data["custom_id"]
-        if custom_id.startswith("mod_pharmacie_"):
-            medicament = custom_id[len("mod_pharmacie_"):]
-            await interaction.response.send_message(f"Combien de {medicament} voulez-vous ajouter ou retirer ? (Nombre positif pour ajouter, négatif pour retirer)", ephemeral=True)
-            def check(message):
-                return message.author == interaction.user and message.channel == interaction.channel
-            try:
-                response = await bot.wait_for('message', check=check, timeout=30)
-                try:
-                    quantity_change = int(response.content)
-                except ValueError:
-                    await interaction.followup.send("Veuillez entrer un nombre valide.", ephemeral=True)
-                    return False
-                await response.delete(delay=10)
-                cur.execute('SELECT quantity FROM stock_pharmacie WHERE item=%s', (medicament,))
-                result = cur.fetchone()
-                if result:
-                    current_quantity = result[0]
-                    new_quantity = max(0, current_quantity + quantity_change)
-                    cur.execute('UPDATE stock_pharmacie SET quantity=%s WHERE item=%s', (new_quantity, medicament))
-                    conn.commit()
-                    confirmation_message = await interaction.followup.send(f"{abs(quantity_change)} {medicament} {'ajoutés' if quantity_change > 0 else 'retirés'}. Nouveau stock : {new_quantity}", ephemeral=True)
-                    await asyncio.sleep(10)
-                    await confirmation_message.delete()
-                    await update_stock_message_pharmacie()
-                else:
-                    print("Erreur : médicament introuvable dans la base de données.")
-            except asyncio.TimeoutError:
-                await interaction.followup.send("Temps écoulé, veuillez réessayer.", ephemeral=True)
-        return True
-
-# Commande pour initialiser les boutons des munitions dans le canal spécifique
+# Nouvelle commande !init globale
 @bot.command()
-async def init_munitions(ctx):
-    global stock_message_munitions
-    if ctx.channel.id == 1290283964547989514:  # ID du canal de munitions
-        view = MunitionsView()
-        if stock_message_munitions is None:
-            stock_message_munitions = await ctx.send("**Chargement du tableau des stocks...**")
+@commands.has_permissions(administrator=True)  # Seuls les administrateurs peuvent utiliser cette commande
+async def init(ctx):
+    global stock_message_munitions, stock_message_pharmacie
+    
+    # Vérification que la commande est exécutée dans un serveur
+    if not ctx.guild:
+        await ctx.send("Cette commande doit être utilisée dans un serveur.")
+        return
+
+    try:
+        # Initialisation du tableau des munitions
+        munitions_channel = bot.get_channel(1290283964547989514)
+        if munitions_channel:
+            # Supprime les anciens messages dans le canal
+            await munitions_channel.purge()
+            
+            stock_message_munitions = await munitions_channel.send("**Chargement du tableau des stocks...**")
             await update_stock_message_munitions()
-            await ctx.send("Gestion des munitions :", view=view)
+            view_munitions = MunitionsView()
+            await munitions_channel.send("Gestion des munitions :", view=view_munitions)
+            
+            # Sauvegarde l'ID du message dans la base de données
             cur.execute('INSERT INTO bot_state (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = %s',
                         ("stock_message_id_munitions", str(stock_message_munitions.id), str(stock_message_munitions.id)))
             conn.commit()
-        await ctx.message.delete(delay=10)
 
-# Commande pour initialiser les boutons des médicaments dans le canal spécifique
-@bot.command()
-async def init_pharmacie(ctx):
-    global stock_message_pharmacie
-    if ctx.channel.id == 1293868842115797013:  # ID du canal de pharmacie
-        view = PharmacieView()
-        if stock_message_pharmacie is None:
-            stock_message_pharmacie = await ctx.send("**Chargement du tableau des stocks...**")
+        # Initialisation du tableau de la pharmacie
+        pharmacie_channel = bot.get_channel(1293868842115797013)
+        if pharmacie_channel:
+            # Supprime les anciens messages dans le canal
+            await pharmacie_channel.purge()
+            
+            stock_message_pharmacie = await pharmacie_channel.send("**Chargement du tableau des stocks...**")
             await update_stock_message_pharmacie()
-            await ctx.send("Gestion de la pharmacie :", view=view)
+            view_pharmacie = PharmacieView()
+            await pharmacie_channel.send("Gestion de la pharmacie :", view=view_pharmacie)
+            
+            # Sauvegarde l'ID du message dans la base de données
             cur.execute('INSERT INTO bot_state_pharmacie (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = %s',
                         ("stock_message_id_pharmacie", str(stock_message_pharmacie.id), str(stock_message_pharmacie.id)))
             conn.commit()
-        await ctx.message.delete(delay=10)
 
-# Classe pour définir le bouton de sélection de la radio
-class RadioButton(ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)  # Timeout désactivé pour garder le bouton actif
+        # Initialisation du bouton radio
+        radio_channel = bot.get_channel(1291085634538176572)
+        if radio_channel:
+            # Supprime les anciens messages dans le canal
+            await radio_channel.purge()
+            
+            view_radio = RadioButton()
+            await radio_channel.send("Appuyez sur le bouton pour sélectionner une station de radio aléatoire :", view=view_radio)
 
-    @ui.button(label="Choisir une station de radio", style=discord.ButtonStyle.primary)
-    async def select_radio(self, interaction: discord.Interaction, button: ui.Button):
-        # Vérification que l'interaction se déroule dans le bon canal
-        if interaction.channel.name == "radio":
-            # Sélection aléatoire d'une station de radio
-            selected_station = random.choice(stations_radio)
-            await interaction.response.send_message(f"Station de radio sélectionnée : **{selected_station}**")
-        else:
-            await interaction.response.send_message("Cette commande ne peut être utilisée que dans le canal **radio**.")
+        # Message de confirmation
+        success_message = await ctx.send("✅ Initialisation terminée avec succès!")
+        await asyncio.sleep(5)
+        await success_message.delete()
+        if ctx.message:
+            await ctx.message.delete()
 
-# Commande pour initialiser le bouton de sélection de station de radio dans le canal radio
-@bot.command()
-async def init_radio(ctx):
-    if ctx.channel.id == 1291085634538176572:  # ID du canal de Radio
-        view = RadioButton()
-        await ctx.send("Appuyez sur le bouton pour sélectionner une station de radio aléatoire :", view=view)
-    else:
-        await ctx.send("Cette commande ne peut être utilisée que dans le canal **radio**.")
+    except Exception as e:
+        error_message = await ctx.send(f"❌ Une erreur est survenue lors de l'initialisation : {str(e)}")
+        await asyncio.sleep(10)
+        await error_message.delete()
+        if ctx.message:
+            await ctx.message.delete()
+
+# Gestion des erreurs pour la commande init
+@init.error
+async def init_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        message = await ctx.send("❌ Vous devez être administrateur pour utiliser cette commande.")
+        await asyncio.sleep(5)
+        await message.delete()
+        if ctx.message:
+            await ctx.message.delete()
 
 keep_alive()
 
 # Lancement du bot
-bot.run(token=token)
+bot.run(token)

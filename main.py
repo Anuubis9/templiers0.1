@@ -4,6 +4,7 @@ from discord.ext import commands
 from discord import ui
 import random
 import psycopg2
+from psycopg2 import sql
 from dotenv import load_dotenv
 
 # Charger les variables d'environnement

@@ -92,24 +92,22 @@ class InventoryBot:
             munitions_channel = self.bot.get_channel(1290283964547989514)
             if munitions_channel:
                 await munitions_channel.purge()
-                self.stock_message_munitions = await munitions_channel.send("**Chargement du tableau des stocks de munitions...**")
                 await self._update_stock_message(munitions_channel, 'munitions')
 
             # Canal de la pharmacie
             pharmacie_channel = self.bot.get_channel(1293868842115797013)
             if pharmacie_channel:
                 await pharmacie_channel.purge()
-                self.stock_message_pharmacie = await pharmacie_channel.send("**Chargement du tableau des stocks de pharmacie...**")
                 await self._update_stock_message(pharmacie_channel, 'pharmacie')
 
         async def _update_stock_message(self, channel, stock_type):
             """Mettre à jour le message de stock"""
             if stock_type == 'munitions':
-                self.cur.execute('SELECT item, quantity FROM stock_munitions')
+                self.cur.execute('SELECT item, quantity FROM stock_munitions ORDER BY item')
                 title = "**Stocks actuels des munitions :**"
                 item_list = MUNITIONS_LIST
             else:
-                self.cur.execute('SELECT item, quantity FROM stock_pharmacie')
+                self.cur.execute('SELECT item, quantity FROM stock_pharmacie ORDER BY item')
                 title = "**Stocks actuels de la pharmacie :**"
                 item_list = PHARMACIE_LIST
 
@@ -126,14 +124,17 @@ class InventoryBot:
             else:
                 message += "*Aucun item en stock.*\n"
 
-            view = InventoryView(stock_type)
+            view = InventoryView(self, stock_type)
             await channel.send(message, view=view)
 
         class InventoryView(discord.ui.View):
-            def __init__(self, stock_type):
+            def __init__(self, bot_instance, stock_type):
                 super().__init__(timeout=None)
-                items = MUNITIONS_LIST if stock_type == 'munitions' else PHARMACIE_LIST
-                for item in items:
+                self.bot_instance = bot_instance
+                self.stock_type = stock_type
+                
+                # Ajouter un modal pour chaque item
+                for item in (MUNITIONS_LIST if stock_type == 'munitions' else PHARMACIE_LIST):
                     button = discord.ui.Button(
                         label=item, 
                         style=discord.ButtonStyle.blurple, 
@@ -143,10 +144,71 @@ class InventoryBot:
                     self.add_item(button)
 
             async def on_button_click(self, interaction: discord.Interaction):
-                await interaction.response.send_message(
-                    f"Vous avez sélectionné : {interaction.custom_id}", 
-                    ephemeral=True
-                )
+                # Créer un modal pour saisir la quantité
+                class QuantityModal(ui.Modal, title="Ajuster la quantité"):
+                    quantity = ui.TextInput(
+                        label="Quantité à ajouter/retirer",
+                        style=discord.TextStyle.short,
+                        placeholder="Entrez un nombre (positif pour ajouter, négatif pour retirer)",
+                        required=True
+                    )
+
+                    def __init__(self, bot_instance, stock_type, item):
+                        super().__init__()
+                        self.bot_instance = bot_instance
+                        self.stock_type = stock_type
+                        self.item = item
+
+                    async def on_submit(self, interaction: discord.Interaction):
+                        try:
+                            # Convertir la quantité en entier
+                            quantity = int(self.quantity.value)
+                            
+                            # Déterminer la table en fonction du type de stock
+                            table_name = 'stock_munitions' if self.stock_type == 'munitions' else 'stock_pharmacie'
+                            
+                            # Mettre à jour la quantité dans la base de données
+                            with self.bot_instance.conn:
+                                with self.bot_instance.conn.cursor() as cur:
+                                    # Récupérer la quantité actuelle
+                                    cur.execute(f'SELECT quantity FROM {table_name} WHERE item = %s', (self.item,))
+                                    current_quantity = cur.fetchone()[0]
+                                    
+                                    # Calculer la nouvelle quantité (ne pas descendre en dessous de 0)
+                                    new_quantity = max(0, current_quantity + quantity)
+                                    
+                                    # Mettre à jour la quantité
+                                    cur.execute(f'UPDATE {table_name} SET quantity = %s WHERE item = %s', 
+                                                (new_quantity, self.item))
+                            
+                            # Réponse à l'utilisateur
+                            await interaction.response.send_message(
+                                f"✅ {self.item} : Quantité mise à jour. "
+                                f"Changement de {quantity} (Nouvelle quantité : {new_quantity})", 
+                                ephemeral=True
+                            )
+                            
+                            # Rafraîchir le message dans le canal approprié
+                            channel = interaction.channel
+                            await channel.purge(limit=2)  # Supprimer le dernier message (stock) et le modal
+                            
+                            # Recréer le message de stock
+                            await self.bot_instance._update_stock_message(channel, self.stock_type)
+                            
+                        except ValueError:
+                            await interaction.response.send_message(
+                                "❌ Erreur : Veuillez entrer un nombre valide.", 
+                                ephemeral=True
+                            )
+                        except Exception as e:
+                            await interaction.response.send_message(
+                                f"❌ Une erreur s'est produite : {str(e)}", 
+                                ephemeral=True
+                            )
+
+                # Créer et ouvrir le modal
+                modal = QuantityModal(self.bot_instance, self.stock_type, interaction.data['custom_id'].split('_')[1])
+                await interaction.response.send_modal(modal)
 
     def run(self):
         """Démarrer le bot"""
